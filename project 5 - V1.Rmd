@@ -1,0 +1,140 @@
+---
+title: "Text Analysis"
+output: html_notebook
+---
+
+Load necessary libraries
+```{r}
+library(tm)
+library(XML)
+```
+
+Read data file from website (Emancipation Proclamation) 
+```{r}
+lincolnLoc   <- URLencode('http://www.historyplace.com/lincoln/emanc.htm')
+doc.html <- htmlTreeParse(lincolnLoc, useInternalNodes = TRUE)
+#doc.html  # un-comment to see html file
+```
+
+Remove HTML code from downloaded file:
+  
+```{r}
+lincoln <- unlist(xpathApply(doc.html,'//p',xmlValue))
+head(lincoln)
+```
+
+Create corpus:
+```{r}
+words.vec <- VectorSource(lincoln)
+words.corpus <- Corpus(words.vec)            
+
+str(lincoln)
+str(words.vec)
+words.corpus
+```
+
+Data wrangling:
+```{r}
+words.corpus <- tm_map(words.corpus, content_transformer(tolower))
+words.corpus <- tm_map(words.corpus, content_transformer(removePunctuation))
+words.corpus <- tm_map(words.corpus, content_transformer(removeNumbers))
+words.corpus <- tm_map(words.corpus, removeWords, stopwords('english'))
+words.corpus
+```
+I experimented with also including a few additional stopwords. These were "united" and "states". I was curious to see how the analysis looked without these most frequently used terms. With the relatively small nature of the document and the importance of these words to the speech, I ultimatley left them in b/c the analysis lost a lot of context without them.
+
+
+Create a term-document matrix:
+```{r}
+tdm <- TermDocumentMatrix(words.corpus)
+tdm
+inspect(tdm)
+
+findFreqTerms(tdm, lowfreq = 5)
+```
+My term document matrix here consists of 223 terms, broken into 18 parts by the Corpus function used earlier in my analysis. Terms used over five times make intuitive sense in relation to the speech. "United" and "States" are central to a speech coming from the president. "One" and "hundred" are used frequently for dates. "Proclamation" and "rebellion" reflect the serious tone of the piece and notify the Southern states of their opposing stance in relation to the will of the president and his administration. 
+
+
+Examine a simple term-document matrix representation by converting to a matrix:
+```{r}
+m <- as.matrix(tdm);  m
+
+wordCounts <- rowSums(m)             
+myNames <- names(wordCounts)        
+
+checkWordCounts <- sort(wordCounts, decreasing = TRUE)
+head(checkWordCounts)
+```
+Analysis indicates the most frequently used terms in the document were "states", "united", "day", "shall", "one" and "people".
+
+
+Perform Cluster Analysis:
+```{r}
+library(cluster); library(lsa)
+
+m1 <- t(m)
+m2 <- m1[,colSums(m1) > 2]
+
+mycos <- as.dist(1 - cosine(m2))  # Cosine Distance Matrix Between Terms
+mean(mycos)
+
+agnes.out <- agnes(mycos, method = "ward",stand = TRUE ) # Agglom. Clust.
+
+pltree(agnes.out, main = " ", ylab = " ", xlab = " ", yaxt = "n", sub = " ") # Create the Dendogram and 
+rect.hclust(agnes.out, k = 6 , border = "red")  # Draw boxes around groups
+```
+In order to make the dendogram more readable, I elected to include only where column sums were greater than 2. I also elected to break into 6 clusters based on the relative and intuitive fit of the output. For example, the second cluster from the left includes many of the number related words, while the first from the right includes many of the action words from the speech. 
+The average cosine distance measure of .5918 (closer to 1) generally indicates terms are relatively close to one another. 
+
+
+Create simple word cloud using 
+(Use "words" / "word counts" to create data frame for word clouds (cloudFrame)):
+```{r}
+library(wordcloud)
+cloudFrame <- data.frame(word = myNames, freq = wordCounts)
+
+wordcloud(cloudFrame$word, cloudFrame$freq)
+```
+The terms that clearly stand out from the simple word cloud include "united" and "states". "Proclamation", "rebellion" and "freedom" also stand out due to their ties to the overall tone of the speech. After playing around with the terms in the cloud, there did not seem to be a need to remove any of the more frequently used words (e.g. "united" and "states") in order to improve readability or to make other words stand out more.
+
+
+Create wordcloud with arbitrary colors:
+```{r}
+wordcloud(cloudFrame$word, cloudFrame$freq, min.freq = 2, max.words = 50, rot.per = 0.35, colors = brewer.pal(8, 'Dark2'))
+```
+In the arbitrary colors word cloud, "united" and "states" once again clearly stand out. "Day" also now stands out along with "rebellion". Proclamation was more hidden in this word cloud due to the orange coloring of many of the other terms around it.
+
+
+Determine if Lincoln's Emancipation Proclamation speech was generally positive or negative:
+Note:    posterms_GI = Postitive words from General Inquirer
+         negterms_GI = Negative words from General Inquirer
+```{r}
+library(devtools)
+install_github("mannau/tm.plugin.sentiment")
+library(tm.plugin.sentiment)
+my.polarity <- polarity(tdm, positive = posterms_GI(), negative = negterms_GI())
+
+mean(my.polarity)
+```
+The average polarity of each document (0.2802469) indicates that the speech is generally positive due to the score being north of 0. This tends to intuitively reflect the tone which is serious to be sure, but generally positive throughout.
+
+
+Create sentiment colored word cloud:
+```{r}
+my.sentiments <- my.polarity %*% t(m)        # agg over documents
+my.colors <- rep(99,length(my.sentiments))
+
+my.colors[my.sentiments <  0] <- 2 # Negative = 2 = red
+my.colors[my.sentiments == 0] <- 1 # Neutral = 1 = black
+my.colors[my.sentiments >  0] <- 3 # Positive = 3 = green
+
+sentDat <- data.frame(myNames = myNames, my.colors = my.colors, v = wordCounts)
+
+wordcloud(sentDat$myNames ,freq = sentDat$v, colors = sentDat$my.colors, random.order = FALSE, ordered.colors = TRUE , scale = c(4,.5) , min.freq = 2)
+
+legend(-.4, .4, c("Positive","Neutral","Negative"), col = c(3 ,1 ,2), lty = 1, ncol = 1, lwd = 5, cex = 1.1 , bty = "n", text.font = 3)
+```
+This word cloud offers greater insight compared to the previous two (simple word cloud and word cloud with arbitrary colors). Visually, it also indicates that the speech was generally positive. "United" and "states" were used most frequently on average in a positive fashion. "Proclamation", on the other hand, was the most freqently used negative term on average. Intuitively, this makes sense b/c it is often used in the speech in conjunction with telling the Southern states how they need to change, "including" is used in a similar manner.
+"Rebellion" was one of the few surprising words in the analysis. It is a term that would seem to stand out as an intuitively negative word in most cases.
+In the end, however, it is clear that the speech was generally positive.
+
